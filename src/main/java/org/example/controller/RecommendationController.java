@@ -1,7 +1,7 @@
 package org.example.controller;
 
 import org.example.dto.RecommendationResponse;
-import org.example.service.RecommendationService;
+import org.example.RecommendationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

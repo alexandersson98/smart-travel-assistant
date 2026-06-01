@@ -1,10 +1,8 @@
-package org.example.service;
+package org.example;
 
 import org.example.dto.RecommendationResponse;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 @Service
 public class RecommendationService {

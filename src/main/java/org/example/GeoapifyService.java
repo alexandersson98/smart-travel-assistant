@@ -1,5 +1,10 @@
-package org.example.service;
+package org.example;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
+import io.github.resilience4j.reactor.retry.RetryOperator;
+import io.github.resilience4j.retry.RetryRegistry;
 import org.example.dto.GeoapifyGeoResponse;
 import org.example.dto.GeoapifyPlacesResponse;
 import org.example.dto.RecommendationResponse;
@@ -13,18 +18,30 @@ import java.util.List;
 
 @Service
 public class GeoapifyService {
+
+    private final WebClient webClient;
+    private final CircuitBreaker circuitBreaker;
+    private final io.github.resilience4j.retry.Retry retry;
+
     @Value("${geoapify.api.key}")
     private String geoapifyApiKey;
-    private final WebClient webClient;
 
-    public GeoapifyService(@Qualifier("geoapifyWebClient") WebClient webClient) {
+    public GeoapifyService(
+            @Qualifier("geoapifyWebClient") WebClient webClient,
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            RetryRegistry retryRegistry) {
         this.webClient = webClient;
+        this.circuitBreaker = circuitBreakerRegistry.circuitBreaker("geoapify");
+        this.retry = retryRegistry.retry("geoapify");
     }
 
     public Mono<List<RecommendationResponse.Activity>> getActivities(String city, String weatherCondition) {
         String category = mapWeatherToCategory(weatherCondition);
         return geocodeCity(city)
-                .flatMap(coords -> fetchPlaces(coords[0], coords[1], category));
+                .flatMap(coords -> fetchPlaces(coords[0], coords[1], category))
+                .transformDeferred(RetryOperator.of(retry))
+                .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
+                .onErrorResume(e -> Mono.just(getFallbackList()));
     }
 
     private Mono<double[]> geocodeCity(String city) {
@@ -40,10 +57,6 @@ public class GeoapifyService {
                     return new double[]{props.lat(), props.lon()};
                 });
     }
-
-
-
-
 
     private Mono<List<RecommendationResponse.Activity>> fetchPlaces(double lat, double lon, String category) {
         return webClient.get()
@@ -61,7 +74,7 @@ public class GeoapifyService {
 
     private List<RecommendationResponse.Activity> mapToActivities(GeoapifyPlacesResponse response) {
         if (response.features() == null || response.features().isEmpty()) {
-            return List.of();
+            return getFallbackList();
         }
         return response.features().stream()
                 .map(f -> new RecommendationResponse.Activity(
@@ -82,5 +95,13 @@ public class GeoapifyService {
             return "entertainment.museum";
         }
         return "leisure.park";
+    }
+
+    private List<RecommendationResponse.Activity> getFallbackList() {
+        return List.of(
+                new RecommendationResponse.Activity("Universeum", "Södra Vägen 50, Göteborg", "entertainment.museum"),
+                new RecommendationResponse.Activity("Slottsskogen", "Linnégatan, Göteborg", "leisure.park"),
+                new RecommendationResponse.Activity("Göteborgs Konstmuseum", "Götaplatsen, Göteborg", "entertainment.museum")
+        );
     }
 }
