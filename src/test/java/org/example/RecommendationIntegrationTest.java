@@ -1,4 +1,4 @@
-package org.example.service;
+package org.example;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -90,6 +90,8 @@ class RecommendationIntegrationTest {
     // Test 2: Retry - Geoapify misslyckas första gången men lyckas på retry
     @Test
     void retry_succeedsAfterTransientFailure() {
+        int countBefore = mockGeoapifyServer.getRequestCount();
+
         mockWeatherServer.enqueue(weatherSuccess());
 
         mockGeoapifyServer.enqueue(new MockResponse().setResponseCode(500));
@@ -102,7 +104,7 @@ class RecommendationIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().activities()).isNotEmpty();
         // 1 misslyckat geocode + 1 lyckat geocode + 1 places = 3 anrop
-        assertThat(mockGeoapifyServer.getRequestCount()).isEqualTo(3);
+        assertThat(mockGeoapifyServer.getRequestCount() - countBefore).isEqualTo(3);
     }
 
     // Test 3: Circuit Breaker övergår till OPEN efter tillräckligt många fel
@@ -128,8 +130,9 @@ class RecommendationIntegrationTest {
     // Test 4: Aktivitets-fallback returneras när Circuit Breaker är OPEN
     @Test
     void activityFallback_returnedWhenCircuitBreakerIsOpen() {
-        circuitBreakerRegistry.circuitBreaker("geoapify").transitionToOpenState();
+        int countBefore = mockGeoapifyServer.getRequestCount(); // spara före
 
+        circuitBreakerRegistry.circuitBreaker("geoapify").transitionToOpenState();
         mockWeatherServer.enqueue(weatherSuccess());
 
         ResponseEntity<RecommendationResponse> response = restTemplate.getForEntity(
@@ -137,8 +140,7 @@ class RecommendationIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().activities()).isNotEmpty();
-        // Geoapify ska inte ha anropats alls
-        assertThat(mockGeoapifyServer.getRequestCount()).isEqualTo(0);
+        assertThat(mockGeoapifyServer.getRequestCount()).isEqualTo(countBefore); // inga nya anrop
     }
 
     private MockResponse weatherSuccess() {
